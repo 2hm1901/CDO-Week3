@@ -1,3 +1,4 @@
+# Pod này có label app nên thỏa policy Gatekeeper và được admit.
 apiVersion: v1
 kind: Pod
 metadata:

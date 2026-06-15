@@ -1,14 +1,18 @@
+# Namespace tách biệt tài nguyên lab khỏi default namespace.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: dev
 ---
+# ServiceAccount đại diện cho workload/user giả lập có quyền hạn giới hạn.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: viewer
   namespace: dev
 ---
+# Role chỉ có hiệu lực trong namespace dev.
+# Rule này chỉ cho phép xem danh sách và chi tiết pod, không cho tạo/xóa/sửa.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -19,6 +23,8 @@ rules:
     resources: ["pods"]
     verbs: ["get", "list"]
 ---
+# RoleBinding gán Role pod-reader cho ServiceAccount viewer.
+# Sau binding này, viewer có quyền get/list pods trong namespace dev.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

@@ -1,8 +1,11 @@
+# ConstraintTemplate định nghĩa một loại policy mới cho Gatekeeper.
+# Sau khi apply, cluster có thêm custom resource kind K8sRequiredLabels.
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
 metadata:
   name: k8srequiredlabels
 spec:
+  # crd mô tả schema cho parameters mà Constraint có thể truyền vào template.
   crd:
     spec:
       names:
@@ -17,11 +20,14 @@ spec:
                 type: string
   targets:
     - target: admission.k8s.gatekeeper.sh
+      # Rego kiểm tra labels bắt buộc có tồn tại trên object đang được tạo/sửa không.
       rego: |
         package k8srequiredlabels
 
         violation[{"msg": msg}] {
+          # input.parameters.labels lấy từ Constraint, ví dụ ["app"].
           required := {label | label := input.parameters.labels[_]}
+          # input.review.object là Kubernetes object đang đi qua admission webhook.
           provided := {label | input.review.object.metadata.labels[label]}
           missing := required - provided
           count(missing) > 0

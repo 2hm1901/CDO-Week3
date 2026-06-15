@@ -1,15 +1,22 @@
+# Constraint là instance cụ thể của template K8sRequiredLabels.
+# Policy này yêu cầu Pod trong namespace dev phải có label app.
 apiVersion: constraints.gatekeeper.sh/v1beta1
 kind: K8sRequiredLabels
 metadata:
   name: dev-pods-must-have-app-label
 spec:
+  # deny: request vi phạm bị chặn ngay tại admission.
+  # Có thể patch sang dryrun để chỉ audit mà không chặn.
   enforcementAction: deny
   match:
+    # Chỉ áp dụng cho kind Pod thuộc core API group.
     kinds:
       - apiGroups: [""]
         kinds: ["Pod"]
+    # Chỉ áp dụng trong namespace dev, không ảnh hưởng namespace khác.
     namespaces:
       - dev
   parameters:
+    # Danh sách labels bắt buộc do ConstraintTemplate đọc qua input.parameters.labels.
     labels:
       - app

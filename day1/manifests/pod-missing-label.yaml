@@ -1,3 +1,5 @@
+# Pod này cố tình không có metadata.labels.app.
+# Khi policy ở deny mode, Gatekeeper sẽ reject manifest này.
 apiVersion: v1
 kind: Pod
 metadata:

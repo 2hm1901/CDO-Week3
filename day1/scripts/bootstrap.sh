@@ -1,25 +1,32 @@
 #!/bin/bash
 set -euxo pipefail
 
+# Các biến này được Terraform render vào script bằng templatefile().
 KUBERNETES_VERSION="${kubernetes_version}"
 GATEKEEPER_VERSION="${gatekeeper_version}"
 LAB_DIR="/opt/w10-day1-rbac-gatekeeper"
 ARCH="amd64"
 
+# Cài package nền tảng. Docker là runtime để kind tạo Kubernetes node container.
 yum update -y
 yum install -y curl docker git jq
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
+# Cài kubectl đúng version Kubernetes của kind node.
 curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/$KUBERNETES_VERSION/bin/linux/$ARCH/kubectl"
 chmod +x /usr/local/bin/kubectl
 
+# Cài kind để tạo Kubernetes cluster local bên trong EC2.
 curl -fsSL -o /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-$ARCH"
 chmod +x /usr/local/bin/kind
 
+# Manifest được ghi ra /opt để người học có thể mở xem và chạy lại bằng kubectl.
 mkdir -p "$LAB_DIR/manifests"
 chown -R ec2-user:ec2-user "$LAB_DIR"
 
+# RBAC lab: tạo namespace dev, service account viewer, Role chỉ đọc pod,
+# và RoleBinding gán Role đó cho service account.
 cat > "$LAB_DIR/manifests/01-rbac.yaml" <<'YAML'
 apiVersion: v1
 kind: Namespace
@@ -57,6 +64,8 @@ roleRef:
   name: pod-reader
 YAML
 
+# Gatekeeper ConstraintTemplate: định nghĩa kind policy K8sRequiredLabels.
+# Rego bên dưới so sánh labels bắt buộc với labels hiện có trên object.
 cat > "$LAB_DIR/manifests/02-required-label-template.yaml" <<'YAML'
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
@@ -89,6 +98,8 @@ spec:
         }
 YAML
 
+# Constraint áp dụng template ở trên cho Pod trong namespace dev.
+# enforcementAction deny nghĩa là request vi phạm sẽ bị API server từ chối.
 cat > "$LAB_DIR/manifests/03-required-label-constraint.yaml" <<'YAML'
 apiVersion: constraints.gatekeeper.sh/v1beta1
 kind: K8sRequiredLabels
@@ -107,6 +118,7 @@ spec:
       - app
 YAML
 
+# Pod cố tình thiếu label app để kiểm tra Gatekeeper deny.
 cat > "$LAB_DIR/manifests/pod-missing-label.yaml" <<'YAML'
 apiVersion: v1
 kind: Pod
@@ -119,6 +131,7 @@ spec:
       image: nginx:1.27-alpine
 YAML
 
+# Pod hợp lệ có label app, dùng để chứng minh policy không chặn sai.
 cat > "$LAB_DIR/manifests/pod-with-label.yaml" <<'YAML'
 apiVersion: v1
 kind: Pod
@@ -133,24 +146,31 @@ spec:
       image: nginx:1.27-alpine
 YAML
 
+# Tạo kind cluster nếu chưa tồn tại. Cluster chạy trong Docker container trên EC2.
 if ! kind get clusters | grep -qx day1; then
   kind create cluster --name day1 --image "kindest/node:$KUBERNETES_VERSION"
 fi
 
+# Ghi kubeconfig cho ec2-user để sau khi SSH vào, kubectl dùng được ngay.
 mkdir -p /home/ec2-user/.kube
 kind get kubeconfig --name day1 > /home/ec2-user/.kube/config
 chown -R ec2-user:ec2-user /home/ec2-user/.kube
 export KUBECONFIG=/home/ec2-user/.kube/config
 
+# Đợi node sẵn sàng rồi apply phần RBAC của lab.
 kubectl wait --for=condition=Ready nodes --all --timeout=180s
 kubectl apply -f "$LAB_DIR/manifests/01-rbac.yaml"
 
+# Cài OPA Gatekeeper từ manifest release chính thức và đợi controller sẵn sàng.
 kubectl apply -f "https://raw.githubusercontent.com/open-policy-agent/gatekeeper/$GATEKEEPER_VERSION/deploy/gatekeeper.yaml"
 kubectl wait --for=condition=Available deployment/gatekeeper-controller-manager -n gatekeeper-system --timeout=300s
 
+# Apply ConstraintTemplate trước để Kubernetes tạo CRD K8sRequiredLabels,
+# sau đó mới apply Constraint instance.
 kubectl apply -f "$LAB_DIR/manifests/02-required-label-template.yaml"
 kubectl wait --for=condition=Established crd/k8srequiredlabels.constraints.gatekeeper.sh --timeout=120s
 kubectl apply -f "$LAB_DIR/manifests/03-required-label-constraint.yaml"
 
+# Đảm bảo ec2-user đọc được toàn bộ manifest sau khi bootstrap hoàn tất.
 chown -R ec2-user:ec2-user "$LAB_DIR"
 echo "W10 Day 1 lab is ready. Follow the repository file day1/README.md."
