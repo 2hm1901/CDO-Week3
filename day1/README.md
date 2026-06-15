@@ -59,6 +59,20 @@ Nếu cloud-init chưa chạy xong:
 sudo tail -f /var/log/cloud-init-output.log
 ```
 
+Nếu thấy lỗi package conflict hoặc `kubectl: command not found`, nghĩa là bootstrap chưa chạy xong hoặc đã fail. Cách sạch nhất là cập nhật code mới nhất rồi để Terraform thay EC2:
+
+```bash
+git pull
+cd day1/terraform
+terraform apply -replace='aws_instance.lab' -var='allowed_ssh_cidr=YOUR_PUBLIC_IP/32'
+```
+
+Sau khi instance mới tạo xong, lấy lại lệnh SSH:
+
+```bash
+terraform output -raw ssh_command
+```
+
 ## Bài lab
 
 Tất cả lệnh trong phần này chạy trên EC2 sau khi SSH vào instance. Bootstrap đã copy manifest vào `/opt/w10-day1-rbac-gatekeeper/manifests`, nên bạn có thể chạy trực tiếp các lệnh bên dưới.

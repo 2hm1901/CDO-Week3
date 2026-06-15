@@ -7,9 +7,10 @@ GATEKEEPER_VERSION="${gatekeeper_version}"
 LAB_DIR="/opt/w10-day1-rbac-gatekeeper"
 ARCH="amd64"
 
-# Cài package nền tảng. Docker là runtime để kind tạo Kubernetes node container.
+# Cài package nền tảng. Amazon Linux 2023 có sẵn curl-minimal,
+# đủ dùng cho download bên dưới; không cài package curl để tránh conflict.
 yum update -y
-yum install -y curl docker git jq
+yum install -y docker git jq
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
