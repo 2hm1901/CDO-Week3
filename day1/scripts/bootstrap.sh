@@ -133,62 +133,6 @@ spec:
       image: nginx:1.27-alpine
 YAML
 
-cat > "$LAB_DIR/README-on-ec2.md" <<'EOF'
-# W10 Day 1 Lab: RBAC + Gatekeeper
-
-Run these commands on the EC2 host as `ec2-user`.
-
-## 1. Check cluster
-
-```bash
-kubectl get nodes
-kubectl get ns dev
-kubectl get sa,role,rolebinding -n dev
-```
-
-## 2. Check RBAC with kubectl auth can-i
-
-```bash
-kubectl auth can-i get pods -n dev --as=system:serviceaccount:dev:viewer
-kubectl auth can-i list pods -n dev --as=system:serviceaccount:dev:viewer
-kubectl auth can-i create pods -n dev --as=system:serviceaccount:dev:viewer
-kubectl auth can-i delete pods -n dev --as=system:serviceaccount:dev:viewer
-kubectl auth can-i list secrets -n dev --as=system:serviceaccount:dev:viewer
-```
-
-Expected: get/list pods = yes. create/delete pods and list secrets = no.
-
-## 3. Check Gatekeeper is enforcing required label
-
-```bash
-kubectl get pods -n gatekeeper-system
-kubectl apply -f /opt/w10-day1-rbac-gatekeeper/manifests/pod-missing-label.yaml
-```
-
-Expected: the pod is rejected because it lacks `metadata.labels.app`.
-
-```bash
-kubectl apply -f /opt/w10-day1-rbac-gatekeeper/manifests/pod-with-label.yaml
-kubectl get pods -n dev --show-labels
-```
-
-Expected: the labeled pod is accepted.
-
-## 4. Switch policy to audit/dryrun mode
-
-```bash
-kubectl patch k8srequiredlabels dev-pods-must-have-app-label \
-  --type merge \
-  -p '{"spec":{"enforcementAction":"dryrun"}}'
-
-kubectl apply -f /opt/w10-day1-rbac-gatekeeper/manifests/pod-missing-label.yaml
-kubectl get pods -n dev --show-labels
-kubectl get k8srequiredlabels dev-pods-must-have-app-label -o yaml
-```
-
-Expected: the pod is now admitted, while the constraint status shows audit violations after Gatekeeper audit runs.
-EOF
-
 if ! kind get clusters | grep -qx day1; then
   kind create cluster --name day1 --image "kindest/node:$KUBERNETES_VERSION"
 fi
@@ -209,4 +153,4 @@ kubectl wait --for=condition=Established crd/k8srequiredlabels.constraints.gatek
 kubectl apply -f "$LAB_DIR/manifests/03-required-label-constraint.yaml"
 
 chown -R ec2-user:ec2-user "$LAB_DIR"
-echo "W10 Day 1 lab is ready. Read $LAB_DIR/README-on-ec2.md"
+echo "W10 Day 1 lab is ready. Follow the repository file day1/README.md."
