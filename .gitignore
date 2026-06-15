@@ -1,0 +1,15 @@
+.DS_Store
+
+# Terraform
+**/.terraform/
+**/.terraform.tfstate
+**/.terraform.tfstate.*
+**/crash.log
+**/crash.*.log
+**/*.tfvars
+**/*.tfvars.json
+**/generated/
+
+# Local editor files
+.idea/
+.vscode/
