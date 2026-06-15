@@ -1,39 +1,39 @@
 # W10 Day 1 Lab: RBAC + OPA Gatekeeper on AWS
 
-Muc tieu lab:
+Mục tiêu bài lab:
 
-- Tao namespace `dev`.
-- Tao `ServiceAccount` ten `viewer`.
-- Tao `Role` chi cho phep `get/list pods`.
-- Tao `RoleBinding` gan role cho service account.
-- Kiem tra quyen bang `kubectl auth can-i`.
-- Cai OPA Gatekeeper.
-- Tao `ConstraintTemplate` bat buoc label.
-- Tao `Constraint` ap dung policy.
-- Thu tao pod thieu label va quan sat bi reject.
-- Chuyen policy sang audit/dryrun mode va kiem tra audit result.
+- Tạo namespace `dev`.
+- Tạo `ServiceAccount` tên `viewer`.
+- Tạo `Role` chỉ cho phép `get/list pods`.
+- Tạo `RoleBinding` gán role cho service account.
+- Kiểm tra quyền bằng `kubectl auth can-i`.
+- Cài OPA Gatekeeper.
+- Tạo `ConstraintTemplate` bắt buộc label.
+- Tạo `Constraint` áp dụng policy.
+- Thử tạo pod thiếu label và quan sát request bị từ chối.
+- Chuyển policy sang audit/dryrun mode và kiểm tra kết quả audit.
 
-## Kien truc
+## Kiến trúc
 
-Terraform tao mot EC2 Amazon Linux 2023 trong default VPC. EC2 nay cai Docker, kind, kubectl, tao Kubernetes cluster local, sau do cai Gatekeeper va apply resources lab.
+Terraform tạo một EC2 Amazon Linux 2023 trong default VPC. EC2 này cài Docker, kind, kubectl, tạo Kubernetes cluster local, sau đó cài Gatekeeper và apply các resource của lab.
 
-Dung EC2 + kind giup lab nhanh, re, va tap trung vao RBAC/admission policy thay vi ton thoi gian dung EKS.
+Dùng EC2 + kind giúp lab nhanh, rẻ, và tập trung vào RBAC/admission policy thay vì tốn thời gian dựng EKS.
 
-## Yeu cau truoc khi chay
+## Yêu cầu trước khi chạy
 
-- AWS credentials da cau hinh tren may local, vi du `aws configure` hoac environment variables.
+- AWS credentials đã cấu hình trên máy local, ví dụ `aws configure` hoặc biến môi trường.
 - Terraform `>= 1.6`.
-- Default VPC con ton tai trong region ban chon.
+- Default VPC còn tồn tại trong region bạn chọn.
 
-Nen gioi han SSH vao public IP cua ban:
+Nên giới hạn SSH vào public IP của bạn:
 
 ```bash
 curl https://checkip.amazonaws.com
 ```
 
-Dung ket qua do lam `allowed_ssh_cidr`, vi du `1.2.3.4/32`.
+Dùng kết quả đó làm `allowed_ssh_cidr`, ví dụ `1.2.3.4/32`.
 
-## Deploy
+## Triển khai
 
 ```bash
 cd day1/terraform
@@ -41,29 +41,29 @@ terraform init
 terraform apply -var='allowed_ssh_cidr=YOUR_PUBLIC_IP/32'
 ```
 
-Lay lenh SSH:
+Lấy lệnh SSH:
 
 ```bash
 terraform output -raw ssh_command
 ```
 
-SSH vao EC2:
+SSH vào EC2:
 
 ```bash
 ssh -i ./generated/w10-day1-rbac-gatekeeper.pem ec2-user@EC2_PUBLIC_IP
 ```
 
-Neu cloud-init chua chay xong:
+Nếu cloud-init chưa chạy xong:
 
 ```bash
 sudo tail -f /var/log/cloud-init-output.log
 ```
 
-## Bai lab
+## Bài lab
 
-Tat ca lenh trong phan nay chay tren EC2 sau khi SSH vao instance. Bootstrap da copy manifest vao `/opt/w10-day1-rbac-gatekeeper/manifests`, nen ban co the chay truc tiep cac lenh ben duoi.
+Tất cả lệnh trong phần này chạy trên EC2 sau khi SSH vào instance. Bootstrap đã copy manifest vào `/opt/w10-day1-rbac-gatekeeper/manifests`, nên bạn có thể chạy trực tiếp các lệnh bên dưới.
 
-Kiem tra user va kubeconfig:
+Kiểm tra user và kubeconfig:
 
 ```bash
 whoami
@@ -71,12 +71,12 @@ kubectl config current-context
 kubectl get nodes
 ```
 
-Ket qua mong doi:
+Kết quả mong đợi:
 
 - `whoami`: `ec2-user`
-- `kubectl get nodes`: node kind o trang thai `Ready`
+- `kubectl get nodes`: node kind ở trạng thái `Ready`.
 
-### 1. Kiem tra namespace, service account, role, rolebinding
+### 1. Kiểm tra namespace, service account, role, rolebinding
 
 ```bash
 kubectl get ns dev
@@ -85,20 +85,20 @@ kubectl describe role pod-reader -n dev
 kubectl describe rolebinding viewer-pod-reader -n dev
 ```
 
-Ket qua mong doi:
+Kết quả mong đợi:
 
-- Namespace `dev` ton tai.
-- ServiceAccount `viewer` nam trong namespace `dev`.
-- Role `pod-reader` chi co verbs `get`, `list` tren resource `pods`.
-- RoleBinding `viewer-pod-reader` gan Role `pod-reader` cho ServiceAccount `viewer`.
+- Namespace `dev` tồn tại.
+- ServiceAccount `viewer` nằm trong namespace `dev`.
+- Role `pod-reader` chỉ có verb `get`, `list` trên resource `pods`.
+- RoleBinding `viewer-pod-reader` gán Role `pod-reader` cho ServiceAccount `viewer`.
 
-Kien thuc cot loi:
+Kiến thức cốt lõi:
 
-- `Role` chi co hieu luc trong mot namespace.
-- `RoleBinding` noi subject voi role. Subject o lab nay la `system:serviceaccount:dev:viewer`.
-- Permission trong RBAC duoc mo ta bang bo `apiGroup + resource + verb`.
+- `Role` chỉ có hiệu lực trong một namespace.
+- `RoleBinding` nối subject với role. Subject ở lab này là `system:serviceaccount:dev:viewer`.
+- Permission trong RBAC được mô tả bằng bộ `apiGroup + resource + verb`.
 
-### 2. Kiem tra RBAC
+### 2. Kiểm tra RBAC
 
 ```bash
 kubectl auth can-i get pods -n dev --as=system:serviceaccount:dev:viewer
@@ -108,7 +108,7 @@ kubectl auth can-i delete pods -n dev --as=system:serviceaccount:dev:viewer
 kubectl auth can-i list secrets -n dev --as=system:serviceaccount:dev:viewer
 ```
 
-Ket qua mong doi:
+Kết quả mong đợi:
 
 - `get pods`: `yes`
 - `list pods`: `yes`
@@ -116,17 +116,17 @@ Ket qua mong doi:
 - `delete pods`: `no`
 - `list secrets`: `no`
 
-Y nghia cot loi: Kubernetes RBAC gan permission theo `verb + resource + namespace`. `viewer` chi xem pod trong namespace `dev`, khong co quyen tao/xoa pod hoac doc secret.
+Ý nghĩa cốt lõi: Kubernetes RBAC gán permission theo `verb + resource + namespace`. `viewer` chỉ xem pod trong namespace `dev`, không có quyền tạo/xóa pod hoặc đọc secret.
 
-Kiem tra them scope namespace:
+Kiểm tra thêm phạm vi namespace:
 
 ```bash
 kubectl auth can-i get pods -n default --as=system:serviceaccount:dev:viewer
 ```
 
-Ket qua mong doi: `no`, vi RoleBinding chi nam trong namespace `dev`.
+Kết quả mong đợi: `no`, vì RoleBinding chỉ nằm trong namespace `dev`.
 
-### 3. Kiem tra Gatekeeper da cai dat
+### 3. Kiểm tra Gatekeeper đã cài đặt
 
 ```bash
 kubectl get pods -n gatekeeper-system
@@ -135,37 +135,37 @@ kubectl get constrainttemplate
 kubectl get k8srequiredlabels
 ```
 
-Ket qua mong doi:
+Kết quả mong đợi:
 
-- Cac pod Gatekeeper o namespace `gatekeeper-system` dang `Running`.
-- Co validating webhook cua Gatekeeper.
-- Co `ConstraintTemplate` ten `k8srequiredlabels`.
-- Co constraint `dev-pods-must-have-app-label`.
+- Các pod Gatekeeper ở namespace `gatekeeper-system` đang `Running`.
+- Có validating webhook của Gatekeeper.
+- Có `ConstraintTemplate` tên `k8srequiredlabels`.
+- Có constraint `dev-pods-must-have-app-label`.
 
-Kien thuc cot loi:
+Kiến thức cốt lõi:
 
-- Gatekeeper hoat dong nhu validating admission webhook.
-- `ConstraintTemplate` dinh nghia loai policy moi bang Rego.
-- `Constraint` la instance cua template, chua scope match va parameter cu the.
+- Gatekeeper hoạt động như validating admission webhook.
+- `ConstraintTemplate` định nghĩa loại policy mới bằng Rego.
+- `Constraint` là instance của template, chứa scope match và parameter cụ thể.
 
-### 4. Thu pod thieu label va quan sat bi reject
+### 4. Thử pod thiếu label và quan sát bị từ chối
 
 ```bash
 kubectl apply -f /opt/w10-day1-rbac-gatekeeper/manifests/pod-missing-label.yaml
 ```
 
-Ket qua mong doi: API server reject pod vi thieu label `app`. Thong bao loi se co noi dung gan nhu `missing required labels`.
+Kết quả mong đợi: API server từ chối pod vì thiếu label `app`. Thông báo lỗi sẽ có nội dung gần như `missing required labels`.
 
-Thu pod hop le:
+Thử pod hợp lệ:
 
 ```bash
 kubectl apply -f /opt/w10-day1-rbac-gatekeeper/manifests/pod-with-label.yaml
 kubectl get pods -n dev --show-labels
 ```
 
-Y nghia cot loi: Gatekeeper la validating admission webhook. Request tao resource di qua API server, Gatekeeper danh gia Rego policy, va co the deny truoc khi object duoc luu vao etcd.
+Ý nghĩa cốt lõi: Gatekeeper là validating admission webhook. Request tạo resource đi qua API server, Gatekeeper đánh giá Rego policy, và có thể deny trước khi object được lưu vào etcd.
 
-### 5. Chuyen sang audit/dryrun mode
+### 5. Chuyển sang audit/dryrun mode
 
 ```bash
 kubectl patch k8srequiredlabels dev-pods-must-have-app-label \
@@ -177,26 +177,26 @@ kubectl get pods -n dev --show-labels
 kubectl get k8srequiredlabels dev-pods-must-have-app-label -o yaml
 ```
 
-Ket qua mong doi: pod thieu label duoc tao, nhung constraint van ghi nhan violation trong status sau khi audit chay.
+Kết quả mong đợi: pod thiếu label được tạo, nhưng constraint vẫn ghi nhận violation trong status sau khi audit chạy.
 
-Neu audit status chua thay violation ngay, doi mot luc roi chay lai:
+Nếu audit status chưa thấy violation ngay, đợi một lúc rồi chạy lại:
 
 ```bash
 sleep 60
 kubectl get k8srequiredlabels dev-pods-must-have-app-label -o yaml
 ```
 
-Y nghia cot loi: enforce mode dung de chan request; dryrun/audit mode dung de do tac dong policy truoc khi bat chan that.
+Ý nghĩa cốt lõi: enforce mode dùng để chặn request; dryrun/audit mode dùng để đo tác động policy trước khi bật chặn thật.
 
-### 6. Dua policy ve deny mode neu muon thu lai
+### 6. Đưa policy về deny mode nếu muốn thử lại
 
-Xoa pod thieu label da duoc tao trong dryrun:
+Xóa pod thiếu label đã được tạo trong dryrun:
 
 ```bash
 kubectl delete pod missing-label -n dev --ignore-not-found
 ```
 
-Dua policy ve `deny`:
+Đưa policy về `deny`:
 
 ```bash
 kubectl patch k8srequiredlabels dev-pods-must-have-app-label \
@@ -204,28 +204,28 @@ kubectl patch k8srequiredlabels dev-pods-must-have-app-label \
   -p '{"spec":{"enforcementAction":"deny"}}'
 ```
 
-Thu tao lai pod thieu label:
+Thử tạo lại pod thiếu label:
 
 ```bash
 kubectl apply -f /opt/w10-day1-rbac-gatekeeper/manifests/pod-missing-label.yaml
 ```
 
-Ket qua mong doi: pod lai bi reject.
+Kết quả mong đợi: pod lại bị từ chối.
 
-## File quan trong
+## File quan trọng
 
-- `day1/terraform/main.tf`: tao EC2, security group, key pair.
+- `day1/terraform/main.tf`: tạo EC2, security group, key pair.
 - `day1/terraform/variables.tf`: region, instance type, SSH CIDR, Kubernetes/Gatekeeper version.
-- `day1/scripts/bootstrap.sh`: cai Docker/kind/kubectl, tao cluster, apply RBAC va Gatekeeper.
+- `day1/scripts/bootstrap.sh`: cài Docker/kind/kubectl, tạo cluster, apply RBAC và Gatekeeper.
 - `day1/manifests/01-rbac.yaml`: namespace, service account, role, rolebinding.
 - `day1/manifests/02-required-label-template.yaml`: Gatekeeper `ConstraintTemplate`.
 - `day1/manifests/03-required-label-constraint.yaml`: Gatekeeper `Constraint`.
-- `day1/manifests/pod-missing-label.yaml`: pod dung de test reject.
-- `day1/manifests/pod-with-label.yaml`: pod hop le dung de test admit.
+- `day1/manifests/pod-missing-label.yaml`: pod dùng để test reject.
+- `day1/manifests/pod-with-label.yaml`: pod hợp lệ dùng để test admit.
 
-## Cleanup
+## Dọn dẹp
 
-Chay tren may local, khong phai tren EC2:
+Chạy trên máy local, không phải trên EC2:
 
 ```bash
 cd day1/terraform
