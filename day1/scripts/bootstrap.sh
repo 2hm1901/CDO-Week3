@@ -14,13 +14,13 @@ yum install -y docker git jq
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
-# Cài kubectl đúng version Kubernetes của kind node.
+# Cài kubectl đúng version Kubernetes mà minikube sẽ chạy.
 curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/$KUBERNETES_VERSION/bin/linux/$ARCH/kubectl"
 chmod +x /usr/local/bin/kubectl
 
-# Cài kind để tạo Kubernetes cluster local bên trong EC2.
-curl -fsSL -o /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-$ARCH"
-chmod +x /usr/local/bin/kind
+# Cài minikube. Lab dùng Docker driver nên không cần hypervisor/VM driver.
+curl -fsSL -o /usr/local/bin/minikube "https://storage.googleapis.com/minikube/releases/latest/minikube-linux-$ARCH"
+chmod +x /usr/local/bin/minikube
 
 # Manifest được ghi ra /opt để người học có thể mở xem và chạy lại bằng kubectl.
 mkdir -p "$LAB_DIR/manifests"
@@ -147,15 +147,14 @@ spec:
       image: nginx:1.27-alpine
 YAML
 
-# Tạo kind cluster nếu chưa tồn tại. Cluster chạy trong Docker container trên EC2.
-if ! kind get clusters | grep -qx day1; then
-  kind create cluster --name day1 --image "kindest/node:$KUBERNETES_VERSION"
-fi
+# Tạo minikube cluster bằng Docker driver dưới user ec2-user.
+# Chạy bằng ec2-user giúp kubeconfig nằm đúng trong /home/ec2-user/.kube/config.
+sudo -u ec2-user -H minikube start \
+  --driver=docker \
+  --kubernetes-version="$KUBERNETES_VERSION" \
+  --container-runtime=docker
 
-# Ghi kubeconfig cho ec2-user để sau khi SSH vào, kubectl dùng được ngay.
-mkdir -p /home/ec2-user/.kube
-kind get kubeconfig --name day1 > /home/ec2-user/.kube/config
-chown -R ec2-user:ec2-user /home/ec2-user/.kube
+# Dùng kubeconfig của ec2-user cho các lệnh kubectl chạy trong bootstrap.
 export KUBECONFIG=/home/ec2-user/.kube/config
 
 # Đợi node sẵn sàng rồi apply phần RBAC của lab.

@@ -15,9 +15,9 @@ Mục tiêu bài lab:
 
 ## Kiến trúc
 
-Terraform tạo một EC2 Amazon Linux 2023 trong default VPC. EC2 này cài Docker, kind, kubectl, tạo Kubernetes cluster local, sau đó cài Gatekeeper và apply các resource của lab.
+Terraform tạo một EC2 Amazon Linux 2023 trong default VPC. EC2 này cài Docker, minikube, kubectl, tạo Kubernetes cluster local bằng Docker driver, sau đó cài Gatekeeper và apply các resource của lab.
 
-Dùng EC2 + kind giúp lab nhanh, rẻ, và tập trung vào RBAC/admission policy thay vì tốn thời gian dựng EKS.
+Dùng EC2 + minikube giúp bạn làm lab trên môi trường quen thuộc, rẻ, và tập trung vào RBAC/admission policy thay vì tốn thời gian dựng EKS.
 
 ## Yêu cầu trước khi chạy
 
@@ -88,7 +88,7 @@ kubectl get nodes
 Kết quả mong đợi:
 
 - `whoami`: `ec2-user`
-- `kubectl get nodes`: node kind ở trạng thái `Ready`.
+- `kubectl get nodes`: node minikube ở trạng thái `Ready`.
 
 ### 1. Kiểm tra namespace, service account, role, rolebinding
 
@@ -230,7 +230,7 @@ Kết quả mong đợi: pod lại bị từ chối.
 
 - `day1/terraform/main.tf`: tạo EC2, security group, key pair.
 - `day1/terraform/variables.tf`: region, instance type, SSH CIDR, Kubernetes/Gatekeeper version.
-- `day1/scripts/bootstrap.sh`: cài Docker/kind/kubectl, tạo cluster, apply RBAC và Gatekeeper.
+- `day1/scripts/bootstrap.sh`: cài Docker/minikube/kubectl, tạo cluster, apply RBAC và Gatekeeper.
 - `day1/manifests/01-rbac.yaml`: namespace, service account, role, rolebinding.
 - `day1/manifests/02-required-label-template.yaml`: Gatekeeper `ConstraintTemplate`.
 - `day1/manifests/03-required-label-constraint.yaml`: Gatekeeper `Constraint`.

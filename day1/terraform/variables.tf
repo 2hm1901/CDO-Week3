@@ -13,8 +13,8 @@ variable "name_prefix" {
 }
 
 variable "instance_type" {
-  # Gatekeeper cần nhiều tài nguyên hơn một chút so với cluster kind rỗng.
-  description = "EC2 instance type. t3.medium gives enough CPU/RAM for kind + Gatekeeper."
+  # Gatekeeper và minikube cần nhiều tài nguyên hơn một chút so với cluster rỗng.
+  description = "EC2 instance type. t3.medium gives enough CPU/RAM for minikube + Gatekeeper."
   type        = string
   default     = "t3.medium"
 }
@@ -27,8 +27,8 @@ variable "allowed_ssh_cidr" {
 }
 
 variable "kubernetes_version" {
-  # Version Kubernetes chạy bên trong kind node.
-  description = "Kind node Kubernetes version."
+  # Version Kubernetes chạy bên trong minikube cluster.
+  description = "Minikube Kubernetes version."
   type        = string
   default     = "v1.30.4"
 }

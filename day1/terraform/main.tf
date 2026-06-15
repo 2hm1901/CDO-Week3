@@ -1,5 +1,5 @@
 # Lấy AMI Amazon Linux 2023 mới nhất để làm lab host.
-# EC2 này chỉ là máy chạy Docker + kind, không phải Kubernetes managed service.
+# EC2 này chỉ là máy chạy Docker + minikube, không phải Kubernetes managed service.
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -52,7 +52,7 @@ resource "aws_key_pair" "lab" {
 }
 
 # Security group chỉ mở SSH inbound từ CIDR bạn truyền vào.
-# Outbound mở toàn bộ để EC2 tải Docker images, kubectl, kind và Gatekeeper manifest.
+# Outbound mở toàn bộ để EC2 tải Docker images, kubectl, minikube và Gatekeeper manifest.
 resource "aws_security_group" "lab" {
   name        = var.name_prefix
   description = "SSH access for W10 Day 1 RBAC and Gatekeeper lab"
@@ -79,7 +79,7 @@ resource "aws_security_group" "lab" {
   }
 }
 
-# EC2 lab host. Cloud-init user_data sẽ cài công cụ, tạo kind cluster,
+# EC2 lab host. Cloud-init user_data sẽ cài công cụ, tạo minikube cluster,
 # apply RBAC resources và cài Gatekeeper policy.
 resource "aws_instance" "lab" {
   ami                         = data.aws_ami.al2023.id
@@ -90,7 +90,7 @@ resource "aws_instance" "lab" {
   associate_public_ip_address = true
 
   root_block_device {
-    # 24 GB đủ cho OS, Docker images, kind node image và manifest lab.
+    # 24 GB đủ cho OS, Docker images, minikube profile và manifest lab.
     volume_size = 24
     volume_type = "gp3"
   }
