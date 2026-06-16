@@ -21,6 +21,15 @@ kubectl delete validatingwebhookconfiguration secretstore-validate externalsecre
 
 kubectl apply -f "$TMP_MANIFEST"
 
+# Một số field trong ValidatingWebhookConfiguration vẫn có thể giữ
+# clientConfig.service.namespace=default. Patch trực tiếp để admission webhook
+# gọi đúng service external-secrets-webhook trong namespace external-secrets.
+for webhook_config in secretstore-validate externalsecret-validate; do
+  kubectl get validatingwebhookconfiguration "$webhook_config" -o json \
+    | jq '(.webhooks[].clientConfig.service.namespace) = "external-secrets"' \
+    | kubectl apply -f -
+done
+
 # Nếu trước đó bạn đã apply manifest cũ vào namespace default, xóa các workload ESO ở default
 # để tránh có hai bộ controller cùng chạy trong lab.
 kubectl delete deployment external-secrets external-secrets-webhook external-secrets-cert-controller \
