@@ -8,11 +8,16 @@ ESO_URL="https://github.com/external-secrets/external-secrets/releases/download/
 TMP_MANIFEST="$(mktemp)"
 trap 'rm -f "$TMP_MANIFEST"' EXIT
 
-# Manifest release v0.10.7 hardcode một số object namespaced vào namespace default.
-# Với lab này, ta rewrite namespace đó sang external-secrets để mọi Deployment/ServiceAccount
-# nằm cùng namespace với credentials Secret aws-secretsmanager-creds.
+# Manifest release v0.10.7 hardcode một số object và cert-controller args vào namespace default.
+# Với lab này, ta rewrite namespace đó sang external-secrets để Deployment/ServiceAccount/Service,
+# webhook service reference và certificate Secret nằm cùng namespace.
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
-curl -fsSL "$ESO_URL" | sed 's/namespace: default/namespace: external-secrets/g' > "$TMP_MANIFEST"
+curl -fsSL "$ESO_URL" \
+  | sed \
+      -e 's/namespace: default/namespace: external-secrets/g' \
+      -e 's/--service-namespace=default/--service-namespace=external-secrets/g' \
+      -e 's/--secret-namespace=default/--secret-namespace=external-secrets/g' \
+  > "$TMP_MANIFEST"
 
 # Xóa webhook configuration cũ trước khi apply lại. Nếu trước đó manifest từng được cài
 # ở namespace default, webhook có thể vẫn trỏ tới external-secrets-webhook.default.svc.

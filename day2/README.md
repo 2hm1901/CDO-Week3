@@ -204,6 +204,7 @@ Script này làm gì:
 - Apply manifest chính thức của ESO.
 - Tạo namespace `external-secrets` nếu chưa tồn tại.
 - Rewrite các dòng `namespace: default` trong manifest release thành `namespace: external-secrets`, vì release manifest v0.10.7 hardcode một số object namespaced vào `default`.
+- Rewrite cả các flag `--service-namespace=default` và `--secret-namespace=default` của cert-controller, nếu không cert-controller sẽ tự reconcile webhook quay lại service namespace `default`.
 - Apply manifest đã rewrite để các Deployment/ServiceAccount/Service nằm đúng namespace.
 - Xóa các workload ESO lỡ được tạo ở namespace `default` từ lần chạy sai trước đó.
 - Kiểm tra namespace và deployments.
