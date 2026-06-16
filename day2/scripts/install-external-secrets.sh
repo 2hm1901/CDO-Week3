@@ -13,6 +13,12 @@ trap 'rm -f "$TMP_MANIFEST"' EXIT
 # nằm cùng namespace với credentials Secret aws-secretsmanager-creds.
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
 curl -fsSL "$ESO_URL" | sed 's/namespace: default/namespace: external-secrets/g' > "$TMP_MANIFEST"
+
+# Xóa webhook configuration cũ trước khi apply lại. Nếu trước đó manifest từng được cài
+# ở namespace default, webhook có thể vẫn trỏ tới external-secrets-webhook.default.svc.
+kubectl delete validatingwebhookconfiguration secretstore-validate externalsecret-validate \
+  --ignore-not-found
+
 kubectl apply -f "$TMP_MANIFEST"
 
 # Nếu trước đó bạn đã apply manifest cũ vào namespace default, xóa các workload ESO ở default

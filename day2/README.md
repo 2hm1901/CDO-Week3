@@ -235,6 +235,13 @@ git pull
 bash day2/scripts/install-external-secrets.sh
 ```
 
+Nếu apply `ClusterSecretStore` gặp lỗi webhook vẫn trỏ tới `external-secrets-webhook.default.svc`, nghĩa là webhook configuration cũ còn stale từ lần cài sai namespace. Chạy:
+
+```bash
+kubectl delete validatingwebhookconfiguration secretstore-validate externalsecret-validate --ignore-not-found
+bash day2/scripts/install-external-secrets.sh
+```
+
 Nếu trước đó bạn đã apply manifest mà quên `-n external-secrets`, có thể các resource đã nằm ở namespace `default`. Kiểm tra bằng:
 
 ```bash
