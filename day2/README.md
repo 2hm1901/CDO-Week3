@@ -16,7 +16,7 @@ Mục tiêu bài lab:
 
 ## Kiến trúc
 
-Lab này dùng lại minikube trên EC2 của Day 1. Terraform Day 2 chỉ tạo phần AWS Secrets Manager và IAM user tối thiểu để External Secrets Operator đọc secret.
+Lab này độc lập với Day 1. Terraform Day 2 tạo một EC2 Amazon Linux 2023 riêng, cài Docker/minikube/kubectl, đồng thời tạo AWS Secrets Manager secret và IAM user tối thiểu để External Secrets Operator đọc secret.
 
 Luồng chính:
 
@@ -39,43 +39,96 @@ Dockerfile
   -> optional Kyverno verifyImages policy
 ```
 
-## 1. Tạo secret trong AWS Secrets Manager
+## 1. Triển khai EC2 và secret bằng Terraform
 
 Chạy trên máy local:
 
 ```bash
 cd day2/terraform
 terraform init
-terraform apply
+terraform apply -var='allowed_ssh_cidr=YOUR_PUBLIC_IP/32'
 ```
 
-Xem tên secret:
+Ví dụ nếu public IP của bạn là `14.191.244.145`:
 
 ```bash
-terraform output secret_name
-terraform output aws_region
+terraform apply -var='allowed_ssh_cidr=14.191.244.145/32'
 ```
 
 Terraform tạo:
 
+- EC2 Day 2 lab host chạy Docker + minikube.
+- SSH key local trong `day2/terraform/generated/`.
 - AWS Secrets Manager secret `w10/day2/demo-app`.
 - IAM user chỉ có quyền `GetSecretValue` và `DescribeSecret` trên secret này.
 - Script local trong `day2/terraform/generated/create-eso-aws-credentials.sh` để tạo Kubernetes Secret chứa AWS credentials cho ESO.
 
-## 2. Chuẩn bị credentials cho External Secrets Operator
-
-Copy script credentials từ máy local lên EC2 Day 1:
+Xem output:
 
 ```bash
-scp -i ../../day1/terraform/generated/w10-day1-rbac-gatekeeper.pem \
-  ./generated/create-eso-aws-credentials.sh \
-  ec2-user@EC2_PUBLIC_IP:/home/ec2-user/create-eso-aws-credentials.sh
+terraform output secret_name
+terraform output aws_region
+terraform output -raw ssh_command
 ```
 
 SSH vào EC2:
 
 ```bash
-ssh -i ../../day1/terraform/generated/w10-day1-rbac-gatekeeper.pem ec2-user@EC2_PUBLIC_IP
+$(terraform output -raw ssh_command)
+```
+
+Nếu cloud-init chưa chạy xong:
+
+```bash
+sudo tail -f /var/log/cloud-init-output.log
+```
+
+Kiểm tra minikube trên EC2:
+
+```bash
+minikube status
+kubectl get nodes
+```
+
+## 1b. Tùy chọn: tạo secret bằng AWS Console
+
+Nếu muốn tự tạo secret trên AWS Console thay vì để Terraform tạo secret:
+
+1. Mở AWS Console.
+2. Vào `AWS Secrets Manager`.
+3. Chọn `Store a new secret`.
+4. Chọn `Other type of secret`.
+5. Thêm 3 key/value:
+   - `username`: `demo-user`
+   - `password`: `change-me-in-real-life`
+   - `api_key`: `demo-api-key`
+6. Secret name: `w10/day2/demo-app`
+7. Giữ các option mặc định cho rotation trong lab này.
+8. Chọn `Store`.
+
+Sau khi tạo bằng Console, copy `Secret ARN`, rồi import secret đó vào Terraform state trước khi `terraform apply`. Việc import giúp Terraform quản lý IAM policy đúng ARN và không cố tạo secret trùng tên:
+
+```bash
+cd day2/terraform
+terraform init
+terraform import aws_secretsmanager_secret.demo SECRET_ARN_FROM_CONSOLE
+terraform apply -var='allowed_ssh_cidr=YOUR_PUBLIC_IP/32'
+```
+
+Lưu ý: nếu bạn import secret đã tạo từ Console, resource `aws_secretsmanager_secret_version.demo` trong Terraform vẫn sẽ ghi version mới theo payload trong `var.secret_payload`. Đây là hành vi chấp nhận được cho lab; production nên quản lý secret value bằng quy trình riêng.
+
+## 2. Chuẩn bị credentials cho External Secrets Operator
+
+Copy script credentials từ máy local lên EC2 Day 2. Chạy từ thư mục `day2/terraform`:
+
+```bash
+$(terraform output -raw scp_credentials_command)
+```
+
+SSH lại vào EC2 nếu bạn chưa ở trong instance:
+
+```bash
+$(terraform output -raw ssh_command)
 ```
 
 Kiểm tra minikube:
@@ -113,9 +166,11 @@ kubectl get crd | grep external-secrets
 
 ## 4. Tạo ClusterSecretStore
 
-Copy manifest Day 2 lên EC2 hoặc `git pull` trên EC2 nếu bạn clone repo ở đó. Sau đó chạy:
+Bootstrap đã clone repo vào `/home/ec2-user/CDO-Week3`. Chạy trên EC2:
 
 ```bash
+cd ~/CDO-Week3
+git pull
 kubectl apply -f day2/manifests/02-cluster-secret-store.yaml
 kubectl get clustersecretstore aws-secretsmanager
 kubectl describe clustersecretstore aws-secretsmanager
@@ -178,12 +233,13 @@ Trong workflow:
 ```yaml
 severity: CRITICAL
 exit-code: "1"
-ignore-unfixed: true
+ignore-unfixed: false
 ```
 
 Ý nghĩa:
 
 - Trivy chỉ xét vulnerability mức `CRITICAL`.
+- `ignore-unfixed: false` nghĩa là cả CVE chưa có bản vá vẫn làm CI fail nếu severity là `CRITICAL`.
 - Nếu tìm thấy critical vulnerability, step scan trả exit code `1`.
 - Job dừng trước khi push/sign image.
 
