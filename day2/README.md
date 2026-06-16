@@ -403,6 +403,264 @@ kubectl get clusterpolicy require-cosign-signature
 
 Policy này yêu cầu image `ghcr.io/*` phải có Cosign keyless signature từ GitHub Actions. Image chưa ký hoặc signature không đúng issuer/subject sẽ bị admission controller từ chối.
 
+## 11. Kịch bản test kiến thức cốt lõi
+
+Các kịch bản này không chỉ để kiểm tra “lab chạy được”, mà để bạn thấy rõ từng cơ chế Day 2 hoạt động như thế nào.
+
+### Test 1: AWS Secrets Manager là source of truth
+
+Học được gì:
+
+- Secret thật nằm ở AWS Secrets Manager.
+- Kubernetes Secret `app-config` là bản sync do ESO tạo ra.
+- App trong cluster không cần biết AWS Secrets Manager, chỉ cần đọc Kubernetes Secret.
+
+Chạy trên EC2:
+
+```bash
+kubectl get externalsecret demo-app-config -n dev
+kubectl get secret app-config -n dev
+kubectl get secret app-config -n dev -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl get secret app-config -n dev -o jsonpath='{.data.password}' | base64 -d; echo
+kubectl get secret app-config -n dev -o jsonpath='{.data.api_key}' | base64 -d; echo
+```
+
+Kết quả mong đợi:
+
+- `ExternalSecret` ở trạng thái ready.
+- `Secret/app-config` tồn tại.
+- Giá trị decode khớp secret trong AWS Secrets Manager.
+
+### Test 2: Secret rotation được sync về Kubernetes
+
+Học được gì:
+
+- Khi secret trong AWS thay đổi, ESO có thể refresh Kubernetes Secret.
+- `refreshInterval: 1m` trong `ExternalSecret` quyết định chu kỳ ESO kiểm tra lại remote secret.
+
+Chạy trên máy local để đổi secret trong AWS:
+
+```bash
+aws secretsmanager put-secret-value \
+  --region ap-southeast-2 \
+  --secret-id w10/day2/demo-app \
+  --secret-string '{"username":"demo-user","password":"rotated-password","api_key":"rotated-api-key"}'
+```
+
+Chạy trên EC2:
+
+```bash
+sleep 90
+kubectl get secret app-config -n dev -o jsonpath='{.data.password}' | base64 -d; echo
+kubectl get secret app-config -n dev -o jsonpath='{.data.api_key}' | base64 -d; echo
+```
+
+Kết quả mong đợi:
+
+- Password đổi thành `rotated-password`.
+- API key đổi thành `rotated-api-key`.
+
+Ý nghĩa:
+
+- Bạn không cần sửa YAML Kubernetes khi rotate secret.
+- App đọc Kubernetes Secret có thể nhận giá trị mới theo cách app reload config của nó.
+
+### Test 3: IAM permission sai làm sync fail
+
+Học được gì:
+
+- ESO không có quyền AWS mặc định.
+- `ClusterSecretStore` phụ thuộc vào credentials trong `Secret/aws-secretsmanager-creds`.
+- Nếu credentials sai, `ExternalSecret` không thể sync.
+
+Chạy trên EC2 để cố tình làm sai secret access key:
+
+```bash
+kubectl create secret generic aws-secretsmanager-creds \
+  --namespace external-secrets \
+  --from-literal=access-key='invalid' \
+  --from-literal=secret-access-key='invalid' \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl delete secret app-config -n dev --ignore-not-found
+kubectl annotate externalsecret demo-app-config -n dev force-sync="$(date +%s)" --overwrite
+sleep 30
+kubectl describe externalsecret demo-app-config -n dev
+kubectl get secret app-config -n dev
+```
+
+Kết quả mong đợi:
+
+- `kubectl describe externalsecret` có lỗi authentication hoặc access denied.
+- `Secret/app-config` không được tạo lại.
+
+Khôi phục:
+
+```bash
+~/create-eso-aws-credentials.sh
+kubectl annotate externalsecret demo-app-config -n dev force-sync="$(date +%s)" --overwrite
+sleep 30
+kubectl get secret app-config -n dev
+```
+
+Kết quả mong đợi sau khi khôi phục:
+
+- `Secret/app-config` được tạo lại.
+
+### Test 4: ExternalSecret sai remote key làm sync fail
+
+Học được gì:
+
+- `ExternalSecret.spec.data[].remoteRef.key` phải trỏ đúng secret name trong AWS.
+- ESO báo lỗi ở status/condition khi remote secret không tồn tại.
+
+Chạy trên EC2:
+
+```bash
+kubectl patch externalsecret demo-app-config -n dev \
+  --type='json' \
+  -p='[{"op":"replace","path":"/spec/data/0/remoteRef/key","value":"w10/day2/not-found"}]'
+
+kubectl annotate externalsecret demo-app-config -n dev force-sync="$(date +%s)" --overwrite
+sleep 30
+kubectl describe externalsecret demo-app-config -n dev
+```
+
+Kết quả mong đợi:
+
+- `ExternalSecret` báo lỗi không tìm thấy remote secret.
+
+Khôi phục:
+
+```bash
+kubectl apply -f day2/manifests/03-external-secret.yaml
+kubectl annotate externalsecret demo-app-config -n dev force-sync="$(date +%s)" --overwrite
+sleep 30
+kubectl get secret app-config -n dev
+```
+
+### Test 5: Trivy gate chặn image có critical vulnerability
+
+Học được gì:
+
+- CI phải chặn image nguy hiểm trước khi push/sign.
+- `exit-code: "1"` biến kết quả scan thành policy gate.
+
+Chạy trên GitHub:
+
+```text
+GitHub repo -> Actions -> Day 2 Supply Chain Security -> Run workflow
+```
+
+Kết quả mong đợi với Dockerfile hiện tại:
+
+- Workflow fail ở step `Scan image with Trivy and fail on critical vulnerabilities` nếu image có CVE critical.
+- Các step push/sign/verify không chạy.
+
+Ý nghĩa:
+
+- Image chưa đạt yêu cầu bảo mật không được đưa vào registry.
+
+### Test 6: .trivyignore là exception có kiểm soát
+
+Học được gì:
+
+- Không phải CVE nào cũng xử lý ngay được.
+- `.trivyignore` cho phép exception, nhưng exception phải có lý do và nên có hạn review.
+
+Chạy sau khi biết CVE làm Trivy fail:
+
+```bash
+echo "CVE_ID_THAT_FAILED" >> day2/app/.trivyignore
+git add day2/app/.trivyignore
+git commit -m "Add temporary Trivy exception"
+git push
+```
+
+Kết quả mong đợi:
+
+- Nếu CVE đó là nguyên nhân duy nhất làm fail, workflow đi tiếp qua step Trivy.
+- Nếu còn CVE critical khác chưa ignore, workflow vẫn fail.
+
+Ý nghĩa:
+
+- Exception không tắt toàn bộ security gate.
+- Exception chỉ bỏ qua CVE được chỉ định.
+
+### Test 7: Cosign verify chứng minh image đến từ GitHub Actions
+
+Học được gì:
+
+- Signature không chỉ nói “image đã ký”, mà còn gắn với issuer và identity.
+- Với keyless signing, GitHub Actions OIDC là nguồn danh tính.
+
+Sau khi workflow đã push và sign image thành công, copy image digest/tag từ workflow logs rồi chạy local hoặc trên EC2 có cài cosign:
+
+```bash
+cosign verify \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+  --certificate-identity-regexp="https://github.com/2hm1901/CDO-Week3/.github/workflows/day2-supply-chain.yml@refs/heads/.*" \
+  "ghcr.io/2hm1901/CDO-Week3/day2-demo:IMAGE_TAG"
+```
+
+Kết quả mong đợi:
+
+- Verify thành công với image do workflow ký.
+- Verify fail nếu issuer/identity regexp không khớp.
+
+Ý nghĩa:
+
+- Bạn kiểm tra được image có nguồn gốc từ workflow của repo, không phải image bị push thủ công từ máy khác.
+
+### Test 8: Admission policy chặn unsigned image
+
+Học được gì:
+
+- CI verify là chưa đủ nếu cluster vẫn cho deploy image chưa ký.
+- Admission controller có thể enforce policy ở thời điểm tạo Pod.
+
+Cài Kyverno và policy nếu chưa làm:
+
+```bash
+kubectl apply -f https://github.com/kyverno/kyverno/releases/download/v1.12.6/install.yaml
+kubectl wait --for=condition=Available deployment/kyverno-admission-controller -n kyverno --timeout=300s
+kubectl apply -f day2/manifests/04-kyverno-verify-image-policy.yaml
+```
+
+Thử tạo Pod dùng image unsigned từ GHCR:
+
+```bash
+kubectl run unsigned-ghcr-test \
+  --image=ghcr.io/2hm1901/CDO-Week3/unsigned-demo:latest \
+  -n dev
+```
+
+Kết quả mong đợi:
+
+- Request bị reject vì image không có Cosign signature hợp lệ.
+
+Thử image không thuộc `ghcr.io/*`:
+
+```bash
+kubectl run nginx-not-in-policy-scope \
+  --image=nginx:1.27-alpine \
+  -n dev
+```
+
+Kết quả mong đợi:
+
+- Pod có thể được tạo vì policy hiện chỉ match `ghcr.io/*`.
+
+Ý nghĩa:
+
+- Policy scope rất quan trọng. Bạn phải xác định rõ registry/image nào cần enforce signature.
+
+Cleanup test pod:
+
+```bash
+kubectl delete pod unsigned-ghcr-test nginx-not-in-policy-scope -n dev --ignore-not-found
+```
+
 ## Dọn dẹp
 
 Vì sao cần bước này:
