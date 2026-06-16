@@ -1,0 +1,27 @@
+# Optional: policy chặn image chưa được ký bằng Cosign.
+# Policy này dùng Kyverno verifyImages, phù hợp hơn Gatekeeper cho bài toán signature verification.
+# Cài Kyverno trước khi apply policy:
+# kubectl apply -f https://github.com/kyverno/kyverno/releases/download/v1.12.6/install.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-cosign-signature
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: verify-ghcr-keyless-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/*"
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    issuer: "https://token.actions.githubusercontent.com"
+                    subjectRegExp: "https://github.com/.+/.github/workflows/.+@refs/heads/.+"

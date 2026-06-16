@@ -1,0 +1,3 @@
+# Ví dụ exception CVE cho Trivy.
+# Khi cần exception thật, thêm mã CVE kèm lý do và ngày hết hạn trong comment review.
+# CVE-2021-36159
