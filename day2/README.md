@@ -177,13 +177,12 @@ Tạo Kubernetes Secret chứa AWS credentials cho ESO:
 ```bash
 chmod +x ~/create-eso-aws-credentials.sh
 ~/create-eso-aws-credentials.sh
-kubectl get secret aws-secretsmanager-creds -n external-secrets
+kubectl get secret aws-secretsmanager-creds -n default
 ```
 
 Kết quả mong đợi:
 
-- Namespace `external-secrets` tồn tại.
-- Secret `aws-secretsmanager-creds` tồn tại trong namespace `external-secrets`.
+- Secret `aws-secretsmanager-creds` tồn tại trong namespace `default`.
 
 ## 3. Cài External Secrets Operator
 
@@ -202,11 +201,9 @@ bash day2/scripts/install-external-secrets.sh
 Script này làm gì:
 
 - Apply manifest chính thức của ESO.
-- Tạo namespace `external-secrets` nếu chưa tồn tại.
-- Rewrite các dòng `namespace: default` trong manifest release thành `namespace: external-secrets`, vì release manifest v0.10.7 hardcode một số object namespaced vào `default`.
-- Rewrite cả các flag `--service-namespace=default` và `--secret-namespace=default` của cert-controller, nếu không cert-controller sẽ tự reconcile webhook quay lại service namespace `default`.
-- Apply manifest đã rewrite để các Deployment/ServiceAccount/Service nằm đúng namespace.
-- Xóa các workload ESO lỡ được tạo ở namespace `default` từ lần chạy sai trước đó.
+- Giữ ESO ở namespace `default`, đúng với manifest release v0.10.7.
+- Xóa webhook configuration cũ trước khi apply lại để tránh stale webhook.
+- Xóa các workload ESO lỡ được tạo ở namespace `external-secrets` từ các lần thử trước đó.
 - Kiểm tra namespace và deployments.
 - Đợi 3 deployment sẵn sàng:
   - `external-secrets`
@@ -217,8 +214,8 @@ Script này làm gì:
 Kết quả mong đợi:
 
 ```bash
-kubectl get pods -n external-secrets
-kubectl get deployment -n external-secrets
+kubectl get pods -n default | grep external-secrets
+kubectl get deployment -n default | grep external-secrets
 kubectl get crd | grep external-secrets
 ```
 
@@ -236,7 +233,7 @@ git pull
 bash day2/scripts/install-external-secrets.sh
 ```
 
-Nếu apply `ClusterSecretStore` gặp lỗi webhook vẫn trỏ tới `external-secrets-webhook.default.svc`, nghĩa là webhook configuration vẫn đang trỏ sai namespace. Script mới sẽ patch trực tiếp mọi `clientConfig.service.namespace` về `external-secrets`. Chạy:
+Nếu apply `ClusterSecretStore` gặp lỗi webhook, xóa webhook config cũ rồi cài lại ESO:
 
 ```bash
 kubectl delete validatingwebhookconfiguration secretstore-validate externalsecret-validate --ignore-not-found
@@ -249,15 +246,15 @@ Kiểm tra lại:
 kubectl get validatingwebhookconfiguration secretstore-validate -o yaml | grep -A6 "service:"
 ```
 
-Kết quả đúng phải là `namespace: external-secrets`.
+Kết quả đúng với manifest release hiện tại là `namespace: default`.
 
-Nếu trước đó bạn đã apply manifest mà quên `-n external-secrets`, có thể các resource đã nằm ở namespace `default`. Kiểm tra bằng:
+Nếu trước đó bạn đã thử ép ESO sang namespace `external-secrets`, có thể còn workload cũ ở đó. Kiểm tra bằng:
 
 ```bash
 kubectl get deployment -A | grep external-secrets
 ```
 
-Sau khi pull bản mới, chạy lại script ở trên. Script sẽ tạo đúng các Deployment trong namespace `external-secrets`.
+Sau khi pull bản mới, chạy lại script ở trên. Script sẽ giữ lại bộ ESO đúng trong namespace `default` và xóa workload thử nghiệm ở `external-secrets`.
 
 ## 4. Tạo ClusterSecretStore
 
@@ -505,7 +502,7 @@ Chạy trên EC2 để cố tình làm sai secret access key:
 
 ```bash
 kubectl create secret generic aws-secretsmanager-creds \
-  --namespace external-secrets \
+  --namespace default \
   --from-literal=access-key='invalid' \
   --from-literal=secret-access-key='invalid' \
   --dry-run=client -o yaml | kubectl apply -f -
