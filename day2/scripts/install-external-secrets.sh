@@ -6,7 +6,10 @@ set -euo pipefail
 ESO_VERSION="v0.10.7"
 ESO_URL="https://github.com/external-secrets/external-secrets/releases/download/${ESO_VERSION}/external-secrets.yaml"
 
-kubectl apply -f "$ESO_URL"
+# Manifest release không tự đảm bảo mọi namespaced resource đi vào namespace
+# external-secrets trong mọi context, nên tạo namespace trước và apply với -n.
+kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -n external-secrets -f "$ESO_URL"
 
 kubectl get namespace external-secrets
 kubectl get deployment -n external-secrets

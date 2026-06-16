@@ -202,6 +202,8 @@ bash day2/scripts/install-external-secrets.sh
 Script này làm gì:
 
 - Apply manifest chính thức của ESO.
+- Tạo namespace `external-secrets` nếu chưa tồn tại.
+- Apply manifest với `-n external-secrets` để các Deployment/ServiceAccount/Service nằm đúng namespace.
 - Kiểm tra namespace và deployments.
 - Đợi 3 deployment sẵn sàng:
   - `external-secrets`
@@ -230,6 +232,14 @@ cd ~/CDO-Week3
 git pull
 bash day2/scripts/install-external-secrets.sh
 ```
+
+Nếu trước đó bạn đã apply manifest mà quên `-n external-secrets`, có thể các resource đã nằm ở namespace `default`. Kiểm tra bằng:
+
+```bash
+kubectl get deployment -A | grep external-secrets
+```
+
+Sau khi pull bản mới, chạy lại script ở trên. Script sẽ tạo đúng các Deployment trong namespace `external-secrets`.
 
 ## 4. Tạo ClusterSecretStore
 
