@@ -151,18 +151,18 @@ kubectl get secret aws-secretsmanager-creds -n external-secrets
 Chạy trên EC2:
 
 ```bash
-kubectl apply -f https://github.com/external-secrets/external-secrets/releases/download/v0.10.7/external-secrets.yaml
-kubectl wait --for=condition=Available deployment/external-secrets -n external-secrets --timeout=300s
-kubectl wait --for=condition=Available deployment/external-secrets-webhook -n external-secrets --timeout=300s
-kubectl wait --for=condition=Available deployment/external-secrets-cert-controller -n external-secrets --timeout=300s
+cd ~/CDO-Week3
+git pull
+bash day2/scripts/install-external-secrets.sh
 ```
 
-Kiểm tra:
+Nếu bạn gặp lỗi:
 
 ```bash
-kubectl get pods -n external-secrets
-kubectl get crd | grep external-secrets
+Error from server (NotFound): deployments.apps "external-secrets" not found
 ```
+
+nghĩa là ESO chưa được cài thật sự. Nguyên nhân hay gặp là apply nhầm file cũ `day2/manifests/01-install-external-secrets.yaml`, file đó trước đây chỉ là note và không tạo Deployment. Hãy chạy lại script `day2/scripts/install-external-secrets.sh`.
 
 ## 4. Tạo ClusterSecretStore
 
