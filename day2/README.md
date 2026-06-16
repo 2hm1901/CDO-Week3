@@ -1,6 +1,11 @@
 # W10 Day 2 Lab: Secrets Rotation + Supply Chain Security
 
-Mục tiêu bài lab:
+Lab này giúp bạn hiểu hai nhóm kiến thức:
+
+- Secrets management: giữ secret ở AWS Secrets Manager, sau đó sync vào Kubernetes bằng External Secrets Operator.
+- Supply chain security: scan image bằng Trivy, fail CI khi có lỗ hổng critical, ký image bằng Cosign, verify signature và chặn image chưa ký nếu có thể.
+
+## Mục tiêu bài lab
 
 - Tạo secret trong AWS Secrets Manager.
 - Cài External Secrets Operator.
@@ -14,17 +19,27 @@ Mục tiêu bài lab:
 - Tạo policy chặn unsigned image nếu có thể.
 - Tạo ví dụ exception CVE bằng `.trivyignore`.
 
+## Vì sao cần các thành phần này?
+
+Kubernetes có object `Secret`, nhưng nếu bạn tự lưu secret trực tiếp trong YAML hoặc Git thì rất dễ lộ secret. Cách tốt hơn là để secret thật trong một secret manager chuyên dụng như AWS Secrets Manager, còn Kubernetes chỉ nhận bản sync cần thiết để workload chạy.
+
+External Secrets Operator, gọi tắt là ESO, là controller chạy trong Kubernetes. Nó đọc secret từ AWS Secrets Manager rồi tạo Kubernetes Secret tương ứng. Nhờ vậy app vẫn dùng Kubernetes Secret như bình thường, nhưng source of truth nằm ở AWS.
+
+Với supply chain, vấn đề không chỉ là app chạy được. Bạn cần biết image có lỗ hổng nghiêm trọng không, image có đúng do CI của repo ký không, và cluster có thể chặn image chưa ký không. Trivy, Cosign và policy admission giải quyết các lớp đó.
+
 ## Kiến trúc
 
-Lab này độc lập với Day 1. Terraform Day 2 tạo một EC2 Amazon Linux 2023 riêng, cài Docker/minikube/kubectl, đồng thời tạo AWS Secrets Manager secret và IAM user tối thiểu để External Secrets Operator đọc secret.
+Terraform Day 2 tạo một EC2 riêng chạy Amazon Linux 2023. EC2 này cài Docker, minikube và kubectl. Terraform cũng tạo AWS Secrets Manager secret và IAM user tối thiểu để ESO đọc secret.
 
-Luồng chính:
+Luồng secrets:
 
 ```text
 AWS Secrets Manager
-  -> External Secrets Operator
+  -> IAM credentials cho ESO
+  -> ClusterSecretStore
   -> ExternalSecret
   -> Kubernetes Secret app-config
+  -> Pod/app có thể mount hoặc đọc secret
 ```
 
 Luồng supply chain:
@@ -39,7 +54,19 @@ Dockerfile
   -> optional Kyverno verifyImages policy
 ```
 
+## Chạy ở đâu?
+
+- Máy local: chạy Terraform, copy credentials script, push code lên GitHub.
+- EC2 Day 2: chạy kubectl, minikube, cài ESO, tạo `ClusterSecretStore`, tạo `ExternalSecret`.
+- GitHub Actions: build, scan, push, sign và verify image.
+
 ## 1. Triển khai EC2 và secret bằng Terraform
+
+Vì sao cần bước này:
+
+- Cần một Kubernetes cluster để cài ESO và test sync secret. Lab dùng minikube trên EC2.
+- Cần AWS Secrets Manager secret làm nguồn secret thật.
+- Cần IAM credentials để ESO có quyền đọc đúng secret đó.
 
 Chạy trên máy local:
 
@@ -49,7 +76,7 @@ terraform init
 terraform apply -var='allowed_ssh_cidr=YOUR_PUBLIC_IP/32'
 ```
 
-Ví dụ nếu public IP của bạn là `14.191.244.145`:
+Ví dụ:
 
 ```bash
 terraform apply -var='allowed_ssh_cidr=14.191.244.145/32'
@@ -61,7 +88,7 @@ Terraform tạo:
 - SSH key local trong `day2/terraform/generated/`.
 - AWS Secrets Manager secret `w10/day2/demo-app`.
 - IAM user chỉ có quyền `GetSecretValue` và `DescribeSecret` trên secret này.
-- Script local trong `day2/terraform/generated/create-eso-aws-credentials.sh` để tạo Kubernetes Secret chứa AWS credentials cho ESO.
+- Script `day2/terraform/generated/create-eso-aws-credentials.sh` để tạo Kubernetes Secret chứa AWS credentials cho ESO.
 
 Xem output:
 
@@ -83,16 +110,20 @@ Nếu cloud-init chưa chạy xong:
 sudo tail -f /var/log/cloud-init-output.log
 ```
 
-Kiểm tra minikube trên EC2:
+Kết quả mong đợi trên EC2:
 
 ```bash
 minikube status
 kubectl get nodes
 ```
 
+Bạn cần thấy node minikube ở trạng thái `Ready`.
+
 ## 1b. Tùy chọn: tạo secret bằng AWS Console
 
-Nếu muốn tự tạo secret trên AWS Console thay vì để Terraform tạo secret:
+Bước này dành cho trường hợp bạn muốn nhìn trực tiếp AWS Secrets Manager trên Console thay vì để Terraform tạo toàn bộ.
+
+Tạo secret trên Console:
 
 1. Mở AWS Console.
 2. Vào `AWS Secrets Manager`.
@@ -102,11 +133,17 @@ Nếu muốn tự tạo secret trên AWS Console thay vì để Terraform tạo 
    - `username`: `demo-user`
    - `password`: `change-me-in-real-life`
    - `api_key`: `demo-api-key`
-6. Secret name: `w10/day2/demo-app`
+6. Secret name: `w10/day2/demo-app`.
 7. Giữ các option mặc định cho rotation trong lab này.
 8. Chọn `Store`.
+9. Copy `Secret ARN`.
 
-Sau khi tạo bằng Console, copy `Secret ARN`, rồi import secret đó vào Terraform state trước khi `terraform apply`. Việc import giúp Terraform quản lý IAM policy đúng ARN và không cố tạo secret trùng tên:
+Vì sao cần import vào Terraform:
+
+- Terraform cần biết ARN của secret để tạo IAM policy cho ESO.
+- Nếu không import, Terraform sẽ cố tạo secret trùng tên và fail.
+
+Import secret đã tạo thủ công:
 
 ```bash
 cd day2/terraform
@@ -115,11 +152,15 @@ terraform import aws_secretsmanager_secret.demo SECRET_ARN_FROM_CONSOLE
 terraform apply -var='allowed_ssh_cidr=YOUR_PUBLIC_IP/32'
 ```
 
-Lưu ý: nếu bạn import secret đã tạo từ Console, resource `aws_secretsmanager_secret_version.demo` trong Terraform vẫn sẽ ghi version mới theo payload trong `var.secret_payload`. Đây là hành vi chấp nhận được cho lab; production nên quản lý secret value bằng quy trình riêng.
+Lưu ý: nếu bạn import secret đã tạo từ Console, resource `aws_secretsmanager_secret_version.demo` trong Terraform vẫn sẽ ghi version mới theo payload trong `var.secret_payload`. Điều này chấp nhận được trong lab; production nên quản lý secret value bằng quy trình riêng.
 
-## 2. Chuẩn bị credentials cho External Secrets Operator
+## 2. Tạo Kubernetes Secret chứa AWS credentials cho ESO
 
-Copy script credentials từ máy local lên EC2 Day 2. Chạy từ thư mục `day2/terraform`:
+Vì sao cần bước này:
+
+ESO chạy trong minikube, không tự có quyền AWS. Trên EKS production thường dùng IRSA/Pod Identity. Trong lab minikube, cách đơn giản nhất là tạo một Kubernetes Secret chứa access key của IAM user read-only.
+
+Copy script credentials từ máy local lên EC2. Chạy từ thư mục `day2/terraform` trên máy local:
 
 ```bash
 $(terraform output -raw scp_credentials_command)
@@ -131,13 +172,6 @@ SSH lại vào EC2 nếu bạn chưa ở trong instance:
 $(terraform output -raw ssh_command)
 ```
 
-Kiểm tra minikube:
-
-```bash
-minikube status
-kubectl get nodes
-```
-
 Tạo Kubernetes Secret chứa AWS credentials cho ESO:
 
 ```bash
@@ -146,7 +180,16 @@ chmod +x ~/create-eso-aws-credentials.sh
 kubectl get secret aws-secretsmanager-creds -n external-secrets
 ```
 
+Kết quả mong đợi:
+
+- Namespace `external-secrets` tồn tại.
+- Secret `aws-secretsmanager-creds` tồn tại trong namespace `external-secrets`.
+
 ## 3. Cài External Secrets Operator
+
+Vì sao cần bước này:
+
+`ExternalSecret` và `ClusterSecretStore` không phải resource mặc định của Kubernetes. Chúng là CRD do External Secrets Operator cài vào cluster. Nếu chưa cài ESO, Kubernetes sẽ không hiểu các kind này hoặc sẽ không có controller nào sync secret.
 
 Chạy trên EC2:
 
@@ -156,17 +199,45 @@ git pull
 bash day2/scripts/install-external-secrets.sh
 ```
 
-Nếu bạn gặp lỗi:
+Script này làm gì:
+
+- Apply manifest chính thức của ESO.
+- Kiểm tra namespace và deployments.
+- Đợi 3 deployment sẵn sàng:
+  - `external-secrets`
+  - `external-secrets-webhook`
+  - `external-secrets-cert-controller`
+- Kiểm tra CRD của ESO.
+
+Kết quả mong đợi:
 
 ```bash
+kubectl get pods -n external-secrets
+kubectl get deployment -n external-secrets
+kubectl get crd | grep external-secrets
+```
+
+Nếu bạn gặp lỗi:
+
+```text
 Error from server (NotFound): deployments.apps "external-secrets" not found
 ```
 
-nghĩa là ESO chưa được cài thật sự. Nguyên nhân hay gặp là apply nhầm file cũ `day2/manifests/01-install-external-secrets.yaml`, file đó trước đây chỉ là note và không tạo Deployment. Hãy chạy lại script `day2/scripts/install-external-secrets.sh`.
+nghĩa là ESO chưa được cài thật sự. Hãy chạy:
+
+```bash
+cd ~/CDO-Week3
+git pull
+bash day2/scripts/install-external-secrets.sh
+```
 
 ## 4. Tạo ClusterSecretStore
 
-Bootstrap đã clone repo vào `/home/ec2-user/CDO-Week3`. Chạy trên EC2:
+Vì sao cần bước này:
+
+`ClusterSecretStore` nói cho ESO biết phải đọc secret từ đâu và xác thực như thế nào. Trong lab này, store trỏ tới AWS Secrets Manager ở region `ap-southeast-2`, dùng Kubernetes Secret `aws-secretsmanager-creds` để lấy access key.
+
+Chạy trên EC2:
 
 ```bash
 cd ~/CDO-Week3
@@ -176,9 +247,18 @@ kubectl get clustersecretstore aws-secretsmanager
 kubectl describe clustersecretstore aws-secretsmanager
 ```
 
+Kết quả mong đợi:
+
+- `ClusterSecretStore` tên `aws-secretsmanager` được tạo.
+- Phần status không báo lỗi authentication.
+
 Lưu ý: file [02-cluster-secret-store.yaml](manifests/02-cluster-secret-store.yaml) đang dùng region `ap-southeast-2`. Nếu bạn đổi `aws_region` trong Terraform, sửa `spec.provider.aws.region` cho khớp.
 
 ## 5. Tạo ExternalSecret và kiểm tra Kubernetes Secret
+
+Vì sao cần bước này:
+
+`ExternalSecret` là yêu cầu sync cụ thể. Nó nói: đọc secret `w10/day2/demo-app` từ AWS Secrets Manager, lấy các property `username`, `password`, `api_key`, rồi tạo Kubernetes Secret tên `app-config` trong namespace `dev`.
 
 Chạy trên EC2:
 
@@ -203,7 +283,17 @@ Kết quả mong đợi:
 - Kubernetes Secret `app-config` được tạo trong namespace `dev`.
 - Giá trị decode khớp payload trong AWS Secrets Manager.
 
+Ý nghĩa cốt lõi:
+
+- App trong Kubernetes chỉ cần đọc `Secret/app-config`.
+- Team platform vẫn quản lý secret thật ở AWS Secrets Manager.
+- Khi secret trong AWS đổi, ESO có thể refresh lại Kubernetes Secret theo `refreshInterval`.
+
 ## 6. GitHub Actions scan image bằng Trivy
+
+Vì sao cần bước này:
+
+Trước khi image được push và deploy, CI nên kiểm tra lỗ hổng bảo mật. Nếu image có vulnerability mức critical, pipeline phải fail để tránh đưa artifact nguy hiểm vào registry.
 
 Workflow nằm ở [.github/workflows/day2-supply-chain.yml](../.github/workflows/day2-supply-chain.yml).
 
@@ -239,11 +329,15 @@ ignore-unfixed: false
 Ý nghĩa:
 
 - Trivy chỉ xét vulnerability mức `CRITICAL`.
+- `exit-code: "1"` làm GitHub Actions step fail nếu tìm thấy lỗi phù hợp điều kiện.
 - `ignore-unfixed: false` nghĩa là cả CVE chưa có bản vá vẫn làm CI fail nếu severity là `CRITICAL`.
-- Nếu tìm thấy critical vulnerability, step scan trả exit code `1`.
-- Job dừng trước khi push/sign image.
+- Job dừng trước khi push/sign image, nên image lỗi không vào registry.
 
 ## 8. Exception CVE bằng .trivyignore
+
+Vì sao cần bước này:
+
+Thực tế có lúc bạn biết một CVE không ảnh hưởng workload, hoặc chưa có fixed version nhưng rủi ro đã được chấp nhận tạm thời. `.trivyignore` cho phép tạo exception có kiểm soát.
 
 File exception mẫu nằm ở [day2/app/.trivyignore](app/.trivyignore).
 
@@ -257,6 +351,10 @@ CVE-2021-36159
 Không nên dùng `.trivyignore` để bỏ qua lỗi tùy tiện. Mỗi exception nên có lý do, owner và ngày hết hạn trong comment hoặc ticket.
 
 ## 9. Ký và verify image bằng Cosign
+
+Vì sao cần bước này:
+
+Scan chỉ nói image có vulnerability hay không. Nó không chứng minh image đó do CI của repo bạn tạo ra. Cosign signature giúp chứng minh nguồn gốc image và phát hiện image bị thay thế hoặc push thủ công không qua pipeline.
 
 Workflow dùng keyless signing, không cần lưu private key trong GitHub Secrets.
 
@@ -283,6 +381,10 @@ cosign verify \
 
 ## 10. Optional: chặn unsigned image bằng Kyverno
 
+Vì sao cần bước này:
+
+Verify trong CI là tốt, nhưng cluster vẫn có thể bị ai đó deploy image chưa ký nếu admission không kiểm tra. Kyverno `verifyImages` cho phép Kubernetes API server từ chối image không có signature hợp lệ.
+
 Kubernetes/Gatekeeper không tự verify Cosign signature nếu không có tích hợp thêm. Cách thực tế và gọn cho lab là dùng Kyverno `verifyImages`.
 
 Cài Kyverno trên EC2:
@@ -302,6 +404,10 @@ kubectl get clusterpolicy require-cosign-signature
 Policy này yêu cầu image `ghcr.io/*` phải có Cosign keyless signature từ GitHub Actions. Image chưa ký hoặc signature không đúng issuer/subject sẽ bị admission controller từ chối.
 
 ## Dọn dẹp
+
+Vì sao cần bước này:
+
+Terraform đã tạo EC2, IAM user/access key và Secrets Manager secret. Nếu không destroy, bạn sẽ tiếp tục tốn chi phí EC2 và giữ lại credentials không cần thiết.
 
 Chạy trên máy local:
 
