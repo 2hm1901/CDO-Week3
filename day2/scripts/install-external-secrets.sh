@@ -5,11 +5,24 @@ set -euo pipefail
 # Script này fail sớm nếu manifest không tạo đủ Deployment mong đợi.
 ESO_VERSION="v0.10.7"
 ESO_URL="https://github.com/external-secrets/external-secrets/releases/download/${ESO_VERSION}/external-secrets.yaml"
+TMP_MANIFEST="$(mktemp)"
+trap 'rm -f "$TMP_MANIFEST"' EXIT
 
-# Manifest release không tự đảm bảo mọi namespaced resource đi vào namespace
-# external-secrets trong mọi context, nên tạo namespace trước và apply với -n.
+# Manifest release v0.10.7 hardcode một số object namespaced vào namespace default.
+# Với lab này, ta rewrite namespace đó sang external-secrets để mọi Deployment/ServiceAccount
+# nằm cùng namespace với credentials Secret aws-secretsmanager-creds.
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n external-secrets -f "$ESO_URL"
+curl -fsSL "$ESO_URL" | sed 's/namespace: default/namespace: external-secrets/g' > "$TMP_MANIFEST"
+kubectl apply -f "$TMP_MANIFEST"
+
+# Nếu trước đó bạn đã apply manifest cũ vào namespace default, xóa các workload ESO ở default
+# để tránh có hai bộ controller cùng chạy trong lab.
+kubectl delete deployment external-secrets external-secrets-webhook external-secrets-cert-controller \
+  -n default --ignore-not-found
+kubectl delete serviceaccount external-secrets external-secrets-webhook external-secrets-cert-controller \
+  -n default --ignore-not-found
+kubectl delete service external-secrets-webhook \
+  -n default --ignore-not-found
 
 kubectl get namespace external-secrets
 kubectl get deployment -n external-secrets
